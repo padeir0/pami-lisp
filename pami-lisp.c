@@ -647,15 +647,61 @@ bool sf_empty(stack_f* sf) {
 
 /*
  * -------------------------------------
+ * |            ###LEXER###            |
+ * -------------------------------------
+ */
+
+ enum lex_kind {
+   lk_quote,
+   lk_left_parens,
+   lk_right_parens,
+   lk_bool,
+   lk_num,
+   lk_str,
+   lk_id,
+   lk_nil
+};
+
+typedef struct {
+  enum lex_kind kind;
+  int16_t begin;
+  int16_t end;
+} lexeme;
+
+typedef struct {
+	int BeginLine, BeginCol;
+	int EndLine, EndCol;
+  
+  int start, end;
+  char* input;
+  lexeme lexeme;
+} lexer;
+
+/*
+ * -------------------------------------
  * |           ###PARSER###            |
  * -------------------------------------
  */
 
+enum prod_kind {
+  pk_exprlist,
+  pk__exprlist,
+  pk_expr,
+  pk_quote,
+  pk__expr,
+  pk_atom,
+  pk_list
+};
+
 typedef struct {
-  int start;
-  int end;
-  char* buff;
-} parser;
+  enum prod_kind pkind;
+  enum lex_kind lkind;
+  bool isTerminal;
+} table_item;
+
+table_item parsing_table[8][7];
+
+void build_table() {}
 
 /*
  * -------------------------------------

@@ -1,0 +1,29 @@
+PAMI = ExprList.
+ExprList = Expr _ExprList.
+_ExprList = ExprList | \e.
+Expr = Quote _Expr.
+_Expr = Atom | List.
+Atom = bool | num | string | id | 'nil'.
+List = '(' ExprList ')'.
+Quote = (quote Quote) | \e.
+
+quote = "'".
+bool = 'true' | 'false'.
+id = id-char {id-char-num}.
+id-char = letters |
+     '~' | '+' | '-' | '_' | '*' | '/' | '?' | '=' |
+     '&' | '$' | '%' | '<' | '>' | '!'.
+id-char-num = id-char | digit.
+str = '"' {ascii|escapes} '"'.
+ascii = /[\u00-\uFF]/.
+escapes = '\r' | '\n' | '\t'.
+num = decimal | hex | bin.
+decimal = decimal-num ['.' decimal-num].
+decimal-num = dec-digit {dec-digit}.
+hex = '0x' hex-digit {hex-digit}.
+bin = '0b' bin-digit {bin-digit}.
+dec-digit = /[0-9]/.
+bin-digit = /[01]/.
+hex-digit = /[0-9A-Fa-f]/.
+letters = /[a-zA-Z]/.
+comment = '#' {ascii} '\n'.
