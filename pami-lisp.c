@@ -22,6 +22,25 @@ size_t distance(uint8_t* a, uint8_t* b) {
 
 /*
  * -------------------------------------
+ * |            ###UTF8###             |
+ * -------------------------------------
+ */
+
+typedef int32_t rune;
+
+const rune EOF = 0;
+
+size_t utf8_encode(char* buffer, rune r) {
+}
+
+size_t utf8_decode(char* buffer, rune* r) {
+}
+
+size_t utf8_rune_size(char* buffer) {
+}
+
+/*
+ * -------------------------------------
  * |            ###POOL###             |
  * -------------------------------------
  */
@@ -571,7 +590,7 @@ uint8_t* sf_alloc(stack_f* sf);
 
 enum sf_RES sf_free(stack_f* sf);
 
-void sf_freeall(stack_f* sf);
+void sf_free_all(stack_f* sf);
 
 size_t sf_available(stack_f* sf);
 
@@ -621,7 +640,7 @@ enum sf_RES sf_free(stack_f* sf) {
   return sf_OK;
 }
 
-void sf_freeall(stack_f* sf) {
+void sf_free_all(stack_f* sf) {
   sf->allocated = 0;
 }
 
@@ -651,31 +670,339 @@ bool sf_empty(stack_f* sf) {
  * -------------------------------------
  */
 
- enum lex_kind {
-   lk_quote,
-   lk_left_parens,
-   lk_right_parens,
-   lk_bool,
-   lk_num,
-   lk_str,
-   lk_id,
-   lk_nil
+
+enum lex_kind {
+  lk_bad,
+  lk_quote,
+  lk_left_parens,
+  lk_right_parens,
+  lk_bool,
+  lk_num,
+  lk_str,
+  lk_id,
+  lk_nil,
+  lk_eof
 };
+
+enum val_kind {
+  vk_none,
+  vk_exact_num,
+  vk_inexact_num,
+  vk_boolean
+};
+
+typedef union {
+  uint64_t exact_num;
+  double   inexact_num;
+  bool     boolean;
+} lex_value;
 
 typedef struct {
   enum lex_kind kind;
+  enum val_kind vkind;
+
   int16_t begin;
   int16_t end;
+
+  lex_value value;
 } lexeme;
 
 typedef struct {
-	int BeginLine, BeginCol;
-	int EndLine, EndCol;
-  
-  int start, end;
   char* input;
   lexeme lexeme;
+  error err;
 } lexer;
+
+lexer new_lexer(char* input) {
+  lexer l;
+  l.input = input;
+  l.lexeme.begin = 0;
+  l.lexeme.end = 0;
+  l.lexeme.vkind = vk_none;
+  l.lexeme.kind = lk_bad;
+  return l;
+}
+
+rune lex_next_rune(lexer* l) {
+  rune r;
+  size_t size = utf8_decode(l->input + l->lexeme.end, &r);
+  if (size == 0 || r == -1) {
+    l->err = err_rune_error;
+    return -1;
+  }
+  l->lexeme.end += size;
+  return r;
+}
+
+rune lex_peek_rune(lexer* l) {
+  rune r;
+  size_t size = utf8_decode(l->input + l->lexeme.end, &r);
+  if (size == 0 || r == -1) {
+    l->err = err_rune_error;
+    return -1;
+  }
+  return r;
+}
+
+void lex_ignore(lexer* l) {
+  l->lexeme.begin = l->lexeme.end;
+  l->lexeme.kind = lk_bad;
+}
+
+typedef bool (*validator)(rune);
+
+bool lex_is_decdigit(rune r) {
+  return (r >= '0' && r <= '9') ||
+         (r == '_');
+}
+
+bool lex_is_hexdigit(rune r) {
+  return (r >= '0' && r <= '9') ||
+         (r >= 'a' && r <= 'f') ||
+         (r >= 'A' && r <= 'F') ||
+         (r == '_');
+}
+
+bool lex_is_bindigit(rune r) {
+  return (r == '0') ||
+         (r == '1') ||
+         (r == '_');
+}
+
+bool lex_is_idchar(rune r) {
+  return (r >= 'a' && r <= 'z') ||
+         (r >= 'A' && r <= 'Z') ||
+         (r == '~') || (r == '+') ||
+         (r == '-') || (r == '_') ||
+         (r == '*') || (r == '/') ||
+         (r == '?') || (r == '=') ||
+         (r == '&') || (r == '$') ||
+         (r == '%') || (r == '<') ||
+         (r == '>') || (r == '!');
+}
+
+bool lex_is_idcharnum(rune r) {
+  return (r >= '0' && r <= '9') ||
+         (r >= 'a' && r <= 'z') ||
+         (r >= 'A' && r <= 'Z') ||
+         (r == '~') || (r == '+') ||
+         (r == '-') || (r == '_') ||
+         (r == '*') || (r == '/') ||
+         (r == '?') || (r == '=') ||
+         (r == '&') || (r == '$') ||
+         (r == '%') || (r == '<') ||
+         (r == '>') || (r == '!');
+}
+
+bool lex_is_whitespace(rune r) {
+  return (r == '\n') || (r == '\r') || (r == '\t');
+}
+
+bool lex_accept_run(lexer* l, validator v) {
+  rune r = lex_peek_rune(l);
+  if (r < 0) {
+    return false;
+  }
+  while (v(r)) {
+    lex_next_rune(l);
+    r = lex_peek_rune(l);
+    if (r < 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool lex_accept_until(lexer* l, validator v) {
+  rune r = lex_peek_rune(l);
+  if (r < 0) {
+    return false;
+  }
+  while (!v(r)) {
+    lex_next_rune(l);
+    r = lex_peek_rune(l);
+    if (r < 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool lex_read_strlit(lexer* l) {
+}
+
+bool lex_read_number(lexer* l) {
+  rune r = lex_peek_rune(l);
+  bool ok;
+  if (r < 0) {
+    return false;
+  }
+  if (r == '0') {
+    lex_next_rune(l);
+    r = lex_peek_rune(l);
+    switch (r) {
+      case 'x':
+        lex_next_rune(l);
+        ok = lex_accept_run(l, lex_is_hexdigit);
+        if (ok == false) {
+          return false;
+        }
+        l->lexeme.value.exact_num = lex_conv_hex(l);
+        l->lexeme.vkind = vk_exact_num;
+        l->lexeme.kind = lk_num;
+        return true;
+      case 'b':
+        lex_next_rune(l);
+        ok = lex_accept_run(l, lex_is_bindigit);
+        if (ok == false) {
+          return false;
+        }
+        l->lexeme.value.exact_num = lex_conv_bin(l);
+        l->lexeme.vkind = vk_exact_num;
+        l->lexeme.kind = lk_num;
+        return true;
+    }
+  }
+  ok = lex_accept_run(l, lex_is_decdigit);
+  if (ok == false) {
+    return false;
+  }
+  r = lex_peek_rune(l);
+  if (r == '.') {
+    lex_next_rune(l);
+    ok = lex_accept_run(l, lex_is_decdigit);
+    if (ok == false) {
+      return false;
+    }
+    l->lexeme.value.inexact_num = lex_conv_inexact(l);
+    l->lexeme.vkind = vk_inexact_num;
+    l->lexeme.kind = lk_num;
+  } else {
+    l->lexeme.value.exact_num = lex_conv_dec(l);
+    l->lexeme.vkind = vk_exact_num;
+    l->lexeme.kind = lk_num;
+  }
+}
+
+bool lex_read_identifier(lexer* l) {
+  rune r = lex_peek_rune(l);
+  bool ok;
+  if (lex_is_idchar(r) == false){
+    l->err.code = error_internal_should_never_happen;
+    return false;
+  }
+  l->lexeme.kind = lk_id;
+  ok = lex_accept_run(l, lex_is_idcharnum);
+  if (ok == false) {
+    return false;
+  }
+  if (lex_is_nil(l)) {
+    l->lexeme.kind = lk_nil;
+  }
+  if (lex_is_bool(l)) {
+    l->lexeme.vkind = vk_boolean;
+    l->lexeme.value.boolean = lex_conv_bool(l);
+    l->lexeme.kind = lk_bool;
+  }
+  return true;
+}
+
+bool lex_read_comment(lexer* l) {
+  rune r = lex_peek_rune(l);
+  if (r != '#') {
+    /* this should never happen */
+    l->err.code = error_internal_should_never_happen;
+    return false;
+  }
+
+  while (r != '\n' && r != EOF) {
+    lex_next_rune(l);
+    r = lex_peek_rune(l);
+    if (r < 0) {
+      return false;
+    }
+  }
+  lex_next_rune(l);
+  return true;
+}
+
+bool lex_ignore_whitespace(lexer* l) {
+  rune r = lex_peek_rune(l);
+  bool ok;
+  if (r < 0) {
+    return false;
+  }
+  while (true) {
+    if (lex_is_whitespace(r)) {
+      lex_next_rune(l);
+    } else if (r == '#') {
+      ok = lex_read_comment(l);
+      if (ok == false) {
+        return false;
+      }
+    }
+
+    r = lex_peek_rune(l);
+    if (r < 0) {
+      return false;
+    }
+  }
+  lex_ignore(l);
+}
+
+bool lex_read_any(lexer* l) {
+  rune r;
+  bool ok = lex_ignore_whitespace(l);
+  if (ok == false) {
+    return false;
+  }
+
+  r = lex_peek_rune(l);
+  if (lex_is_decdigit(r)) {
+    return lex_read_number(l);
+  }
+  if (lex_is_idchar(r)){
+    return lex_read_identifier(l);
+  }
+  switch (r) {
+    case '"':
+      return lex_read_strlit(l);
+    case '(':
+      lex_next_rune(l);
+      l->lexeme.kind = lk_left_parens;
+    case ')':
+      lex_next_rune(l);
+      l->lexeme.kind = lk_right_parens;
+    case '\'':
+      lex_next_rune(l);
+      l->lexeme.kind = lk_quote;
+  }
+  return true;
+}
+
+/*
+ * it returns true if everything went smoothly,
+ * and returns false if there was some error.
+ * the error is stored in lexer.err
+ */
+bool lex_next(lexer* l) {
+  l->lexeme.begin = l->lexeme.end;
+  return lex_read_any(l);
+}
+
+bool lex_read_all(lexer* l, lexeme* outbuffer, size_t outbuffer_size) {
+  int i = 0;
+  while (lex_next(l) && i < outbuffer_size) {
+    outbuffer[i] = l->lexeme;
+    i++;
+  }
+  if (l->lexeme.kind != lk_eof) {
+    return false;
+  }
+  return true;
+}
 
 /*
  * -------------------------------------
@@ -683,25 +1010,50 @@ typedef struct {
  * -------------------------------------
  */
 
-enum prod_kind {
+typedef enum {
+  tbi_null,
+  tbi_eelist,  /* expr _exprlist   */
+  tbi_elist,   /* exprlist         */
+  tbi_qexpr,   /* quote _expr      */
+  tbi_quote,   /* "'" quote        */
+  tbi_empty,   /* \e               */
+  tbi_atom,    /* atom             */
+  tbi_bool,    /* bool             */
+  tbi_num,     /* num              */
+  tbi_nil,     /* "nil"            */
+  tbi_id,      /* id               */
+  tbi_str,     /* str              */
+  tbi_list,    /* list             */
+  tbi_thelist, /* "(" exprlist ")" */
+} parser_table_item;
+
+parser_table_item parser_parsing_table[7][8] =
+{
+/*               '           (            bool        num         str         id          nil         eof */
+/* exprlist  */ {tbi_eelist, tbi_eelist,  tbi_eelist, tbi_eelist, tbi_eelist, tbi_eelist, tbi_eelist, tbi_null},
+/* _exprlist */ {tbi_elist,  tbi_elist,   tbi_elist,  tbi_elist,  tbi_elist,  tbi_elist,  tbi_elist,  tbi_empty},
+/* expr      */ {tbi_qexpr,  tbi_qexpr,   tbi_qexpr,  tbi_qexpr,  tbi_qexpr,  tbi_qexpr,  tbi_qexpr,  tbi_null},
+/* quote     */ {tbi_quote,  tbi_empty,   tbi_empty,  tbi_empty,  tbi_empty,  tbi_empty,  tbi_empty,  tbi_null},
+/* _expr     */ {tbi_null,   tbi_list,    tbi_atom,   tbi_atom,   tbi_atom,   tbi_atom,   tbi_atom,   tbi_null},
+/* atom      */ {tbi_null,   tbi_null,    tbi_bool,   tbi_num,    tbi_str,    tbi_id,     tbi_nil,    tbi_null},
+/* list      */ {tbi_null,   tbi_thelist, tbi_null,   tbi_null,   tbi_null,   tbi_null,   tbi_null,   tbi_null},
+};
+
+enum parser_prodkind {
   pk_exprlist,
   pk__exprlist,
   pk_expr,
-  pk_quote,
   pk__expr,
+  pk_quote,
   pk_atom,
   pk_list
 };
 
 typedef struct {
-  enum prod_kind pkind;
   enum lex_kind lkind;
+  enum parser_prodkind pkind;
   bool isTerminal;
-} table_item;
-
-table_item parsing_table[8][7];
-
-void build_table() {}
+} parser_stack_item;
 
 /*
  * -------------------------------------
@@ -714,5 +1066,4 @@ void build_table() {}
  * |         ###EVALUATOR###           |
  * -------------------------------------
  */
-
 

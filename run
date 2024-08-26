@@ -1,6 +1,6 @@
 #!/bin/bash
 
-gcc -Wall -W -Werror -ansi --pedantic -c pami-lisp.c -o pami-lisp.o
+gcc -Wall -W -Werror -ansi --pedantic -Wno-unused-result -c pami-lisp.c -o pami-lisp.o
 gcc -Wall -W -Werror -ansi --pedantic -c test.c -o test.o
 gcc pami-lisp.o test.o -o test
 rm *.o

@@ -28,17 +28,34 @@ enum datum_tag {
 };
 
 typedef union {
+  /* generated directly by the parser */
   int64_t exact_num;
   double inexact_num;
   bool boolean;
   str string;
+  symbol symbol;
   pair pair;
+
+  /* only generated on evaluation */
   cproc cproc;
   lambda lambda;
-  symbol symbol;
 } datum_union;
 
 typedef struct datum {
   enum datum_tag tag;
   datum_union data;
 } datum;
+
+enum error_code {
+  error_contract_violation,
+};
+
+typedef struct {
+  int begin, end;
+} range;
+
+typedef struct {
+  range range;
+  char* message;
+  enum error_code code;
+} error;
