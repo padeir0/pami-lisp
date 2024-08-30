@@ -52,7 +52,8 @@ typedef struct datum {
 enum error_code {
   error_contract_violation,
   error_bad_rune,
-  error_internal_lexer
+  error_internal_lexer,
+  error_unrecognized_rune
 };
 
 typedef struct {

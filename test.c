@@ -30,7 +30,34 @@ void utf8_test() {
   printf("utf8_test: OK\n");
 }
 
+char lex_test_data[] = "(+ abcde 123 0b101 0xCAFE 123.0 \"\x68\U00000393\U000030AC\U000101FA\")\n";
+
+void print_lexeme(const char* input, lexeme l) {
+  int begin = l.begin;
+  putchar('"');
+  while (begin < l.end) {
+    putchar(*(input + begin));
+    begin++;
+  }
+  putchar('"');
+  putchar('\n');
+}
+
 int main() {
   utf8_test();
+
+  printf("%s", lex_test_data);
+  lexer l = lex_new_lexer(lex_test_data);
+  
+  while (lex_next(&l) && l.lexeme.kind != lk_eof) {
+    print_lexeme(l.input, l.lexeme);
+  }
+
+  if (l.lexeme.kind != lk_eof) {
+    printf("lex error at %d:%d number %d\n", l.err.range.begin, l.err.range.end, l.err.code);
+    abort();
+  }
+
+
   return 0;
 }

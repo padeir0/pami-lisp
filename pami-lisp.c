@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 /*
  * -------------------------------------
@@ -31,13 +32,16 @@ size_t distance(const uint8_t* a, const uint8_t* b) {
 
 typedef int32_t rune;
 
-const rune EoF = 0;
+#define EoF (rune)0
 
 size_t utf8_decode(const char* buffer, rune* r) {
   if ((buffer[0] & TOP_BITS(1)) == 0) { /* ASCII */
     *r = (rune)buffer[0];
     return 1;
-  } else if ((buffer[0] & TOP_BITS(3)) == TOP_BITS(2)) { /* TWO BYTE SEQUENCE */
+  }
+
+  /* TWO BYTE SEQUENCE */
+  if ((buffer[0] & TOP_BITS(3)) == TOP_BITS(2)) {
     if ((buffer[1] & TOP_BITS(2)) != TOP_BITS(1)) {
       *r = -1;
       return 0;
@@ -45,7 +49,10 @@ size_t utf8_decode(const char* buffer, rune* r) {
     *r = (rune)(buffer[0] & LOW_BITS(5)) << 6 |
          (rune)(buffer[1] & LOW_BITS(6));
     return 2;
-  } else if ((buffer[0] & TOP_BITS(4)) == TOP_BITS(3)) { /* THREE BYTE SEQUENCE */
+  }
+
+  /* THREE BYTE SEQUENCE */
+  if ((buffer[0] & TOP_BITS(4)) == TOP_BITS(3)) {
     if ((buffer[1] & TOP_BITS(2)) != TOP_BITS(1) ||
         (buffer[2] & TOP_BITS(2)) != TOP_BITS(1)) {
       *r = -1;
@@ -55,7 +62,10 @@ size_t utf8_decode(const char* buffer, rune* r) {
          (rune)(buffer[1] & LOW_BITS(6)) << 6 |
          (rune)(buffer[2] & LOW_BITS(6));
     return 3;
-  } else if ((buffer[0] & TOP_BITS(5)) == TOP_BITS(4)) { /* FOUR BYTE SEQUENCE */
+  }
+
+  /* FOUR BYTE SEQUENCE */
+  if ((buffer[0] & TOP_BITS(5)) == TOP_BITS(4)) {
     if ((buffer[1] & TOP_BITS(2)) != TOP_BITS(1) ||
         (buffer[2] & TOP_BITS(2)) != TOP_BITS(1) ||
         (buffer[3] & TOP_BITS(2)) != TOP_BITS(1)) {
@@ -66,11 +76,12 @@ size_t utf8_decode(const char* buffer, rune* r) {
          (rune)(buffer[1] & LOW_BITS(6)) << 12 |
          (rune)(buffer[2] & LOW_BITS(6)) << 6 |
          (rune)(buffer[3] & LOW_BITS(6));
-    return 3;
-  } else { /* INVALID ENCODING */
-    *r = -1;
-    return 0;
+    return 4;
   }
+
+  /* INVALID ENCODING */
+  *r = -1;
+  return 0;
 }
 
 /*
@@ -747,7 +758,7 @@ typedef struct {
   error err;
 } lexer;
 
-lexer new_lexer(const char* input) {
+lexer lex_new_lexer(const char* input) {
   lexer l;
   l.input = input;
   l.lexeme.begin = 0;
@@ -768,6 +779,14 @@ error lex_err_bad_rune(lexer* l) {
 error lex_err_internal(lexer* l) {
   error err;
   err.code = error_internal_lexer;
+  err.range.begin = l->lexeme.begin;
+  err.range.end = l->lexeme.end;
+  return err;
+}
+
+error lex_err_unrecognized(lexer* l) {
+  error err;
+  err.code = error_unrecognized_rune;
   err.range.begin = l->lexeme.begin;
   err.range.end = l->lexeme.end;
   return err;
@@ -845,7 +864,7 @@ bool lex_is_idcharnum(rune r) {
 }
 
 bool lex_is_whitespace(rune r) {
-  return (r == '\n') || (r == '\r') || (r == '\t');
+  return (r == ' ') || (r == '\n') || (r == '\r') || (r == '\t');
 }
 
 bool lex_is_special_str_char(rune r) {
@@ -891,6 +910,7 @@ bool lex_read_strlit(lexer* l) {
     l->err = lex_err_internal(l);
     return false;
   }
+  lex_next_rune(l);
 
   while (true) {
     ok = lex_accept_until(l, lex_is_special_str_char);
@@ -922,6 +942,7 @@ bool lex_conv_hex(lexer* l, uint64_t* value) {
   while (begin < end) {
     c = *begin;
     if (c == '_') {
+      begin++;
       continue;
     }
     output *= 16;
@@ -935,6 +956,7 @@ bool lex_conv_hex(lexer* l, uint64_t* value) {
       l->err = lex_err_internal(l);
       return false;
     }
+    begin++;
   }
   *value = output;
   return true;
@@ -949,6 +971,7 @@ bool lex_conv_bin(lexer* l, uint64_t* value) {
   while (begin < end) {
     c = *begin;
     if (c == '_') {
+      begin++;
       continue;
     }
     output *= 2;
@@ -958,6 +981,7 @@ bool lex_conv_bin(lexer* l, uint64_t* value) {
       l->err = lex_err_internal(l);
       return false;
     }
+    begin++;
   }
   *value = output;
   return true;
@@ -971,6 +995,7 @@ bool lex_conv_dec(lexer* l, uint64_t* value) {
   while (begin < end) {
     c = *begin;
     if (c == '_') {
+      begin++;
       continue;
     }
     output *= 10;
@@ -980,6 +1005,7 @@ bool lex_conv_dec(lexer* l, uint64_t* value) {
       l->err = lex_err_internal(l);
       return false;
     }
+    begin++;
   }
   *value = output;
   return true;
@@ -994,10 +1020,12 @@ bool lex_conv_inexact(lexer* l, double* value) {
   while (begin < end) {
     c = *begin;
     if (c == '_') {
+      begin++;
       continue;
     }
     if (c == '.') {
       fractional += 1;
+      begin++;
       continue;
     }
 
@@ -1011,6 +1039,7 @@ bool lex_conv_inexact(lexer* l, double* value) {
       l->err = lex_err_internal(l);
       return false;
     }
+    begin++;
   }
   *value = output;
   return true;
@@ -1206,6 +1235,8 @@ bool lex_ignore_whitespace(lexer* l) {
       if (ok == false) {
         return false;
       }
+    } else {
+      break;
     }
 
     r = lex_peek_rune(l);
@@ -1214,6 +1245,7 @@ bool lex_ignore_whitespace(lexer* l) {
     }
   }
   lex_ignore(l);
+  return true;
 }
 
 bool lex_read_any(lexer* l) {
@@ -1245,6 +1277,12 @@ bool lex_read_any(lexer* l) {
       lex_next_rune(l);
       l->lexeme.kind = lk_quote;
       break;
+    case EoF:
+      l->lexeme.kind = lk_eof;
+      break;
+    default:
+      l->err = lex_err_unrecognized(l);
+      return false;
   }
   return true;
 }
@@ -1257,18 +1295,6 @@ bool lex_read_any(lexer* l) {
 bool lex_next(lexer* l) {
   l->lexeme.begin = l->lexeme.end;
   return lex_read_any(l);
-}
-
-bool lex_read_all(lexer* l, lexeme* outbuffer, size_t outbuffer_size) {
-  size_t i = 0;
-  while (lex_next(l) && i < outbuffer_size) {
-    outbuffer[i] = l->lexeme;
-    i++;
-  }
-  if (l->lexeme.kind != lk_eof) {
-    return false;
-  }
-  return true;
 }
 
 /*
