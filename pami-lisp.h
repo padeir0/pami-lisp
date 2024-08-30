@@ -1,3 +1,6 @@
+#ifndef PAMI_HEADER
+#define PAMI_HEADER
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -48,6 +51,8 @@ typedef struct datum {
 
 enum error_code {
   error_contract_violation,
+  error_bad_rune,
+  error_internal_lexer
 };
 
 typedef struct {
@@ -56,6 +61,7 @@ typedef struct {
 
 typedef struct {
   range range;
-  char* message;
   enum error_code code;
 } error;
+
+#endif

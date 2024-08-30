@@ -12,7 +12,7 @@
 
 #define WORD sizeof(void*)
 
-size_t distance(uint8_t* a, uint8_t* b) {
+size_t distance(const uint8_t* a, const uint8_t* b) {
   if (a > b) {
     return a-b;
   } else {
@@ -26,17 +26,51 @@ size_t distance(uint8_t* a, uint8_t* b) {
  * -------------------------------------
  */
 
+#define LOW_BITS(n) (uint8_t)((1<<n)-1)
+#define TOP_BITS(n) (uint8_t)(~((1<<(8-n))-1))
+
 typedef int32_t rune;
 
-const rune EOF = 0;
+const rune EoF = 0;
 
-size_t utf8_encode(char* buffer, rune r) {
-}
-
-size_t utf8_decode(char* buffer, rune* r) {
-}
-
-size_t utf8_rune_size(char* buffer) {
+size_t utf8_decode(const char* buffer, rune* r) {
+  if ((buffer[0] & TOP_BITS(1)) == 0) { /* ASCII */
+    *r = (rune)buffer[0];
+    return 1;
+  } else if ((buffer[0] & TOP_BITS(3)) == TOP_BITS(2)) { /* TWO BYTE SEQUENCE */
+    if ((buffer[1] & TOP_BITS(2)) != TOP_BITS(1)) {
+      *r = -1;
+      return 0;
+    }
+    *r = (rune)(buffer[0] & LOW_BITS(5)) << 6 |
+         (rune)(buffer[1] & LOW_BITS(6));
+    return 2;
+  } else if ((buffer[0] & TOP_BITS(4)) == TOP_BITS(3)) { /* THREE BYTE SEQUENCE */
+    if ((buffer[1] & TOP_BITS(2)) != TOP_BITS(1) ||
+        (buffer[2] & TOP_BITS(2)) != TOP_BITS(1)) {
+      *r = -1;
+      return 0;
+    }
+    *r = (rune)(buffer[0] & LOW_BITS(4)) << 12 |
+         (rune)(buffer[1] & LOW_BITS(6)) << 6 |
+         (rune)(buffer[2] & LOW_BITS(6));
+    return 3;
+  } else if ((buffer[0] & TOP_BITS(5)) == TOP_BITS(4)) { /* FOUR BYTE SEQUENCE */
+    if ((buffer[1] & TOP_BITS(2)) != TOP_BITS(1) ||
+        (buffer[2] & TOP_BITS(2)) != TOP_BITS(1) ||
+        (buffer[3] & TOP_BITS(2)) != TOP_BITS(1)) {
+      *r = -1;
+      return 0;
+    }
+    *r = (rune)(buffer[0] & LOW_BITS(3)) << 18 |
+         (rune)(buffer[1] & LOW_BITS(6)) << 12 |
+         (rune)(buffer[2] & LOW_BITS(6)) << 6 |
+         (rune)(buffer[3] & LOW_BITS(6));
+    return 3;
+  } else { /* INVALID ENCODING */
+    *r = -1;
+    return 0;
+  }
 }
 
 /*
@@ -95,17 +129,17 @@ void pool_free_all(pool* p);
 
 /* returns the amount of memory available
  */
-size_t pool_available(pool* p);
+size_t pool_available(const pool* p);
 
 /* returns the amount of memory used
  */
-size_t pool_used(pool* p);
+size_t pool_used(const pool* p);
 
 /* returns if the pool is empty
  */
-bool pool_empty(pool* p);
+bool pool_empty(const pool* p);
 
-#define pool_offsetnode(a, x) (pool_node*)((uint8_t*)a + x)
+#define POOL_OFFSETNODE(a, x) (pool_node*)((uint8_t*)a + x)
 
 char* pool_str_res(enum pool_RES r) {
   switch (r) {
@@ -130,11 +164,11 @@ void pool_set_list(pool* p) {
   /* we need this because of alignment, the chunks may not align
    * and leave a padding at the end of the buffer
    */
-  pool_node* end = pool_offsetnode(p->end, -p->chunksize);
+  pool_node* end = POOL_OFFSETNODE(p->end, -p->chunksize);
 
   p->head = curr;
   while (curr < end) {
-    curr->next = pool_offsetnode(curr, p->chunksize);
+    curr->next = POOL_OFFSETNODE(curr, p->chunksize);
     curr = curr->next;
   }
 
@@ -143,7 +177,7 @@ void pool_set_list(pool* p) {
    */
   if ((uint8_t*)curr + p->chunksize != p->end) {
     p->end = (uint8_t*)curr;
-    curr = pool_offsetnode(curr, -p->chunksize);
+    curr = POOL_OFFSETNODE(curr, -p->chunksize);
     p->size = distance(p->begin, p->end);
   }
 
@@ -226,7 +260,7 @@ void pool_free_all(pool* p) {
   pool_set_list(p);
 }
 
-size_t pool_available(pool* p) {
+size_t pool_available(const pool* p) {
   size_t total = 0;
   pool_node* curr = p->head;
   while (curr != NULL) {
@@ -236,11 +270,11 @@ size_t pool_available(pool* p) {
   return total;
 }
 
-size_t pool_used(pool* p) {
+size_t pool_used(const pool* p) {
   return p->size - pool_available(p);
 }
 
-bool pool_empty(pool* p) {
+bool pool_empty(const pool* p) {
   size_t total = pool_available(p);
   if (total < p->size) {
     return false;
@@ -281,7 +315,7 @@ typedef struct {
 } freelist;
 
 size_t fl_pad(size_t size);
-size_t fl_objsize(void* size);
+size_t fl_objsize(const void* size);
 
 freelist* fl_create(uint8_t* buffer, size_t size, enum fl_RES* res);
 
@@ -301,15 +335,15 @@ enum fl_RES fl_free(freelist* fl, void* obj);
 void fl_free_all(freelist* fl);
 
 /* returns the amount of memory available */
-size_t fl_available(freelist* fl);
+size_t fl_available(const freelist* fl);
 
 /* returns the amount of memory used */
-size_t fl_used(freelist* fl);
+size_t fl_used(const freelist* fl);
 
 /* returns if the heap is empty */
-bool fl_empty(freelist* fl);
+bool fl_empty(const freelist* fl);
 
-#define fl_offsetnode(a, x) (fl_node*)((uint8_t*)a + x)
+#define FL_OFFSETNODE(a, x) (fl_node*)((uint8_t*)a + x)
 
 size_t fl_pad(size_t size) {
   size = size + sizeof(fl_obj_header);
@@ -366,7 +400,7 @@ uint8_t* fl_pop(freelist* fl, fl_node* prev, fl_node* curr) {
 uint8_t* fl_split(freelist* fl, fl_node* prev, fl_node* curr, size_t requested_size) {
   fl_node* newnode;
 
-  newnode = fl_offsetnode(curr, requested_size);
+  newnode = FL_OFFSETNODE(curr, requested_size);
   newnode->size = curr->size - requested_size;
   newnode->next = curr->next;
 
@@ -436,7 +470,7 @@ void* fl_alloc(freelist* fl, size_t size) {
 }
 
 void fl_append(fl_node* prev, fl_node* new) {
-  if (fl_offsetnode(prev, prev->size) == new) {
+  if (FL_OFFSETNODE(prev, prev->size) == new) {
     /* coalescing: append */
     prev->size = prev->size + new->size;
     return;
@@ -447,7 +481,7 @@ void fl_append(fl_node* prev, fl_node* new) {
 }
 
 void fl_prepend(freelist* fl, fl_node* new) {
-  if (fl_offsetnode(new, new->size) == fl->head) {
+  if (FL_OFFSETNODE(new, new->size) == fl->head) {
     /* coalescing: prepend */
     new->size = new->size + fl->head->size;
     new->next = fl->head->next;
@@ -463,11 +497,11 @@ void fl_prepend(freelist* fl, fl_node* new) {
 void fl_join(fl_node* prev, fl_node* new, fl_node* curr) {
   size_t size;
 
-  if (fl_offsetnode(prev, prev->size) == new) {
+  if (FL_OFFSETNODE(prev, prev->size) == new) {
     /* coalescing: append */
     size = prev->size + new->size;
 
-    if (fl_offsetnode(prev, size) == curr) {
+    if (FL_OFFSETNODE(prev, size) == curr) {
 			/* in this case, prev, new and curr are adjacent */
 			prev->size = size + curr->size;
 			prev->next = curr->next;
@@ -478,7 +512,7 @@ void fl_join(fl_node* prev, fl_node* new, fl_node* curr) {
     return;
   }
 
-  if (fl_offsetnode(new, new->size) == curr) {
+  if (FL_OFFSETNODE(new, new->size) == curr) {
     /* coalescing: prepend */
     prev->next = new;
     new->size = new->size + curr->size;
@@ -491,7 +525,7 @@ void fl_join(fl_node* prev, fl_node* new, fl_node* curr) {
   return;
 }
 
-size_t fl_objsize(void* ptr) {
+size_t fl_objsize(const void* ptr) {
   fl_obj_header* obj = (fl_obj_header*)((uint8_t*)ptr - sizeof(fl_obj_header));
   return obj->size;
 }
@@ -548,7 +582,7 @@ void fl_free_all(freelist* fl) {
   fl->head->next = NULL;
 }
 
-size_t fl_available(freelist* fl) {
+size_t fl_available(const freelist* fl) {
   fl_node* curr = fl->head;
   size_t total = 0;
 
@@ -559,11 +593,11 @@ size_t fl_available(freelist* fl) {
   return total;
 }
 
-size_t fl_used(freelist* fl) {
+size_t fl_used(const freelist* fl) {
   return fl->size - fl_available(fl);
 }
 
-bool fl_empty(freelist* fl) {
+bool fl_empty(const freelist* fl) {
   return fl_available(fl) == fl->size;
 }
 
@@ -592,11 +626,11 @@ enum sf_RES sf_free(stack_f* sf);
 
 void sf_free_all(stack_f* sf);
 
-size_t sf_available(stack_f* sf);
+size_t sf_available(const stack_f* sf);
 
-size_t sf_used(stack_f* sf);
+size_t sf_used(const stack_f* sf);
 
-bool sf_empty(stack_f* sf);
+bool sf_empty(const stack_f* sf);
 
 char* sf_str_res(enum sf_RES res) {
   switch (res) {
@@ -644,15 +678,15 @@ void sf_free_all(stack_f* sf) {
   sf->allocated = 0;
 }
 
-size_t sf_available(stack_f* sf) {
+size_t sf_available(const stack_f* sf) {
   return sf->buffsize - sf->allocated;
 }
 
-size_t sf_used(stack_f* sf) {
+size_t sf_used(const stack_f* sf) {
   return sf->allocated;
 }
 
-bool sf_empty(stack_f* sf) {
+bool sf_empty(const stack_f* sf) {
   return sf->allocated == 0;
 }
 
@@ -708,12 +742,12 @@ typedef struct {
 } lexeme;
 
 typedef struct {
-  char* input;
+  const char* input;
   lexeme lexeme;
   error err;
 } lexer;
 
-lexer new_lexer(char* input) {
+lexer new_lexer(const char* input) {
   lexer l;
   l.input = input;
   l.lexeme.begin = 0;
@@ -723,11 +757,27 @@ lexer new_lexer(char* input) {
   return l;
 }
 
+error lex_err_bad_rune(lexer* l) {
+  error err;
+  err.code = error_bad_rune;
+  err.range.begin = l->lexeme.begin;
+  err.range.end = l->lexeme.end;
+  return err;
+}
+
+error lex_err_internal(lexer* l) {
+  error err;
+  err.code = error_internal_lexer;
+  err.range.begin = l->lexeme.begin;
+  err.range.end = l->lexeme.end;
+  return err;
+}
+
 rune lex_next_rune(lexer* l) {
   rune r;
   size_t size = utf8_decode(l->input + l->lexeme.end, &r);
   if (size == 0 || r == -1) {
-    l->err = err_rune_error;
+    l->err = lex_err_bad_rune(l);
     return -1;
   }
   l->lexeme.end += size;
@@ -738,7 +788,7 @@ rune lex_peek_rune(lexer* l) {
   rune r;
   size_t size = utf8_decode(l->input + l->lexeme.end, &r);
   if (size == 0 || r == -1) {
-    l->err = err_rune_error;
+    l->err = lex_err_bad_rune(l);
     return -1;
   }
   return r;
@@ -798,6 +848,10 @@ bool lex_is_whitespace(rune r) {
   return (r == '\n') || (r == '\r') || (r == '\t');
 }
 
+bool lex_is_special_str_char(rune r) {
+  return (r == '\\') || (r == '"');
+}
+
 bool lex_accept_run(lexer* l, validator v) {
   rune r = lex_peek_rune(l);
   if (r < 0) {
@@ -831,11 +885,142 @@ bool lex_accept_until(lexer* l, validator v) {
 }
 
 bool lex_read_strlit(lexer* l) {
+  rune r = lex_peek_rune(l);
+  bool ok;
+  if (r != '"') {
+    l->err = lex_err_internal(l);
+    return false;
+  }
+
+  while (true) {
+    ok = lex_accept_until(l, lex_is_special_str_char);
+    if (ok == false) {
+      return false;
+    }
+
+    if (r == '"') {
+      lex_next_rune(l);
+      return true;
+    }
+
+    if (r == '\\') {
+      lex_next_rune(l);
+      ok = lex_next_rune(l);
+      if (ok == false) {
+        return false;
+      }
+    }
+  }
+}
+
+bool lex_conv_hex(lexer* l, uint64_t* value) {
+  /* jump the '0x' */
+  char* begin = (char*)l->input + l->lexeme.begin + 2;
+  char* end = (char*)l->input + l->lexeme.end;
+  char c;
+  uint64_t output = 0;
+  while (begin < end) {
+    c = *begin;
+    if (c == '_') {
+      continue;
+    }
+    output *= 16;
+    if (c >= '0' && c <= '9') {
+      output += (c - '0');
+    } else if (c >= 'a' && c <= 'z') {
+      output += (c - 'a') + 10;
+    } else if (c >= 'A' && c <= 'Z') {
+      output += (c - 'A') + 10;
+    } else {
+      l->err = lex_err_internal(l);
+      return false;
+    }
+  }
+  *value = output;
+  return true;
+}
+
+bool lex_conv_bin(lexer* l, uint64_t* value) {
+  /* jump the '0b' */
+  char* begin = (char*)l->input + l->lexeme.begin + 2;
+  char* end = (char*)l->input + l->lexeme.end;
+  char c;
+  uint64_t output = 0;
+  while (begin < end) {
+    c = *begin;
+    if (c == '_') {
+      continue;
+    }
+    output *= 2;
+    if (c == '0' || c == '1') {
+      output += (c - '0');
+    } else {
+      l->err = lex_err_internal(l);
+      return false;
+    }
+  }
+  *value = output;
+  return true;
+}
+
+bool lex_conv_dec(lexer* l, uint64_t* value) {
+  char* begin = (char*)l->input + l->lexeme.begin;
+  char* end = (char*)l->input + l->lexeme.end;
+  char c;
+  uint64_t output = 0;
+  while (begin < end) {
+    c = *begin;
+    if (c == '_') {
+      continue;
+    }
+    output *= 10;
+    if (c >= '0' && c <= '9') {
+      output += (c - '0');
+    } else {
+      l->err = lex_err_internal(l);
+      return false;
+    }
+  }
+  *value = output;
+  return true;
+}
+
+bool lex_conv_inexact(lexer* l, double* value) {
+  char* begin = (char*)l->input + l->lexeme.begin;
+  char* end = (char*)l->input + l->lexeme.end;
+  char c;
+  int fractional = 0;
+  double output = 0;
+  while (begin < end) {
+    c = *begin;
+    if (c == '_') {
+      continue;
+    }
+    if (c == '.') {
+      fractional += 1;
+      continue;
+    }
+
+    if (c >= '0' && c <= '9' && fractional == 0) {
+      output *= 10;
+      output += (c - '0');
+    } else if (c >= '0' && c <= '9' && fractional > 0) {
+      output += (double)(c - '0') / (10.0*fractional);
+      fractional += 1;
+    } else {
+      l->err = lex_err_internal(l);
+      return false;
+    }
+  }
+  *value = output;
+  return true;
 }
 
 bool lex_read_number(lexer* l) {
   rune r = lex_peek_rune(l);
   bool ok;
+  uint64_t exact_value;
+  double inexact_value;
   if (r < 0) {
     return false;
   }
@@ -849,7 +1034,11 @@ bool lex_read_number(lexer* l) {
         if (ok == false) {
           return false;
         }
-        l->lexeme.value.exact_num = lex_conv_hex(l);
+        ok = lex_conv_hex(l, &exact_value);
+        if (ok == false) {
+          return false;
+        }
+        l->lexeme.value.exact_num = exact_value;
         l->lexeme.vkind = vk_exact_num;
         l->lexeme.kind = lk_num;
         return true;
@@ -859,7 +1048,11 @@ bool lex_read_number(lexer* l) {
         if (ok == false) {
           return false;
         }
-        l->lexeme.value.exact_num = lex_conv_bin(l);
+        ok = lex_conv_bin(l, &exact_value);
+        if (ok == false) {
+          return false;
+        }
+        l->lexeme.value.exact_num = exact_value;
         l->lexeme.vkind = vk_exact_num;
         l->lexeme.kind = lk_num;
         return true;
@@ -876,21 +1069,88 @@ bool lex_read_number(lexer* l) {
     if (ok == false) {
       return false;
     }
-    l->lexeme.value.inexact_num = lex_conv_inexact(l);
+    ok = lex_conv_inexact(l, &inexact_value);
+    if (ok == false) {
+      return false;
+    }
+    l->lexeme.value.inexact_num = inexact_value;
     l->lexeme.vkind = vk_inexact_num;
     l->lexeme.kind = lk_num;
   } else {
-    l->lexeme.value.exact_num = lex_conv_dec(l);
+    ok = lex_conv_dec(l, &exact_value);
+    if (ok == false) {
+      return false;
+    }
+    l->lexeme.value.exact_num = exact_value;
     l->lexeme.vkind = vk_exact_num;
     l->lexeme.kind = lk_num;
   }
+  return true;
+}
+
+/* We could get fancy here and implement strcomp and have cleaner code
+ * but that would be slower,
+ * besides, we only have 3 keywords anyway.
+ */
+bool lex_is_nil(const lexer* l) {
+  char* buffer;
+  if (l->lexeme.end - l->lexeme.begin != 3) {
+    false;
+  }
+  buffer = (char*)l->input + l->lexeme.begin;
+  return buffer[0] == 'n' &&
+         buffer[1] == 'i' &&
+         buffer[2] == 'l';
+}
+
+bool lex_is_true(const lexer* l) {
+  char* buffer;
+  if (l->lexeme.end - l->lexeme.begin != 4) {
+    false;
+  }
+  buffer = (char*)l->input + l->lexeme.begin;
+  return buffer[0] == 't' &&
+         buffer[1] == 'r' &&
+         buffer[2] == 'u' &&
+         buffer[3] == 'e';
+}
+
+bool lex_is_false(const lexer* l) {
+  char* buffer;
+  if (l->lexeme.end - l->lexeme.begin != 5) {
+    false;
+  }
+  buffer = (char*)l->input + l->lexeme.begin;
+  return buffer[0] == 'f' &&
+         buffer[1] == 'a' &&
+         buffer[2] == 'l' &&
+         buffer[3] == 's' &&
+         buffer[4] == 'e';
+}
+
+bool lex_is_bool(const lexer* l) {
+  return lex_is_true(l) || lex_is_false(l);
+}
+
+/* returns false if there was an error */
+bool lex_conv_bool(lexer* l, bool* value) {
+  if (lex_is_false(l)) {
+    *value = false;
+    return true;
+  }
+  if (lex_is_true(l)) {
+    *value = true;
+    return true;
+  }
+  l->err = lex_err_internal(l);
+  return false;
 }
 
 bool lex_read_identifier(lexer* l) {
   rune r = lex_peek_rune(l);
-  bool ok;
+  bool ok; bool value;
   if (lex_is_idchar(r) == false){
-    l->err.code = error_internal_should_never_happen;
+    l->err = lex_err_internal(l);
     return false;
   }
   l->lexeme.kind = lk_id;
@@ -902,8 +1162,12 @@ bool lex_read_identifier(lexer* l) {
     l->lexeme.kind = lk_nil;
   }
   if (lex_is_bool(l)) {
+    ok = lex_conv_bool(l, &value);
+    if (ok == false) {
+      return false;
+    }
+    l->lexeme.value.boolean = value;
     l->lexeme.vkind = vk_boolean;
-    l->lexeme.value.boolean = lex_conv_bool(l);
     l->lexeme.kind = lk_bool;
   }
   return true;
@@ -913,11 +1177,11 @@ bool lex_read_comment(lexer* l) {
   rune r = lex_peek_rune(l);
   if (r != '#') {
     /* this should never happen */
-    l->err.code = error_internal_should_never_happen;
+    l->err = lex_err_internal(l);
     return false;
   }
 
-  while (r != '\n' && r != EOF) {
+  while (r != '\n' && r != EoF) {
     lex_next_rune(l);
     r = lex_peek_rune(l);
     if (r < 0) {
@@ -972,12 +1236,15 @@ bool lex_read_any(lexer* l) {
     case '(':
       lex_next_rune(l);
       l->lexeme.kind = lk_left_parens;
+      break;
     case ')':
       lex_next_rune(l);
       l->lexeme.kind = lk_right_parens;
+      break;
     case '\'':
       lex_next_rune(l);
       l->lexeme.kind = lk_quote;
+      break;
   }
   return true;
 }
@@ -993,7 +1260,7 @@ bool lex_next(lexer* l) {
 }
 
 bool lex_read_all(lexer* l, lexeme* outbuffer, size_t outbuffer_size) {
-  int i = 0;
+  size_t i = 0;
   while (lex_next(l) && i < outbuffer_size) {
     outbuffer[i] = l->lexeme;
     i++;
@@ -1024,7 +1291,7 @@ typedef enum {
   tbi_id,      /* id               */
   tbi_str,     /* str              */
   tbi_list,    /* list             */
-  tbi_thelist, /* "(" exprlist ")" */
+  tbi_thelist  /* "(" exprlist ")" */
 } parser_table_item;
 
 parser_table_item parser_parsing_table[7][8] =
