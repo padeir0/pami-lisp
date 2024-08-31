@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "pami-lisp.c"
 
 char* utf8_test_data = "\x68\U00000393\U000030AC\U000101FA";
@@ -33,7 +34,7 @@ void utf8_test() {
 char lex_test_data[] = "(+ abcde 123 0b101 0xCAFE 123.0 \"\x68\U00000393\U000030AC\U000101FA\")\n";
 
 void print_lexeme(const char* input, lexeme l) {
-  int begin = l.begin;
+  size_t begin = l.begin;
   putchar('"');
   while (begin < l.end) {
     putchar(*(input + begin));
@@ -47,7 +48,7 @@ int main() {
   utf8_test();
 
   printf("%s", lex_test_data);
-  lexer l = lex_new_lexer(lex_test_data);
+  lexer l = lex_new_lexer(lex_test_data, strlen(lex_test_data));
   
   while (lex_next(&l) && l.lexeme.kind != lk_eof) {
     print_lexeme(l.input, l.lexeme);

@@ -746,21 +746,23 @@ typedef struct {
   enum lex_kind kind;
   enum val_kind vkind;
 
-  int16_t begin;
-  int16_t end;
+  size_t begin;
+  size_t end;
 
   lex_value value;
 } lexeme;
 
 typedef struct {
   const char* input;
+  size_t input_size;
   lexeme lexeme;
   error err;
 } lexer;
 
-lexer lex_new_lexer(const char* input) {
+lexer lex_new_lexer(const char* input, size_t size) {
   lexer l;
   l.input = input;
+  l.input_size = size;
   l.lexeme.begin = 0;
   l.lexeme.end = 0;
   l.lexeme.vkind = vk_none;
@@ -794,7 +796,13 @@ error lex_err_unrecognized(lexer* l) {
 
 rune lex_next_rune(lexer* l) {
   rune r;
-  size_t size = utf8_decode(l->input + l->lexeme.end, &r);
+  size_t size;
+
+  if (l->lexeme.end >= l->input_size) {
+    return EoF;
+  }
+  
+  size = utf8_decode(l->input + l->lexeme.end, &r);
   if (size == 0 || r == -1) {
     l->err = lex_err_bad_rune(l);
     return -1;
@@ -805,7 +813,13 @@ rune lex_next_rune(lexer* l) {
 
 rune lex_peek_rune(lexer* l) {
   rune r;
-  size_t size = utf8_decode(l->input + l->lexeme.end, &r);
+  size_t size;
+  if (l->lexeme.end >= l->input_size) {
+    return EoF;
+  }
+
+  size = utf8_decode(l->input + l->lexeme.end, &r);
+  
   if (size == 0 || r == -1) {
     l->err = lex_err_bad_rune(l);
     return -1;
@@ -1305,48 +1319,43 @@ bool lex_next(lexer* l) {
 
 typedef enum {
   tbi_null,
-  tbi_eelist,  /* expr _exprlist   */
-  tbi_elist,   /* exprlist         */
-  tbi_qexpr,   /* quote _expr      */
-  tbi_quote,   /* "'" quote        */
+  tbi_eelist,  /* expr exprlist    */
+  tbi_list,    /* "(" exprlist ")" */
+  tbi_qexpr,   /* "'" expr         */
   tbi_empty,   /* \e               */
-  tbi_atom,    /* atom             */
   tbi_bool,    /* bool             */
   tbi_num,     /* num              */
   tbi_nil,     /* "nil"            */
   tbi_id,      /* id               */
-  tbi_str,     /* str              */
-  tbi_list,    /* list             */
-  tbi_thelist  /* "(" exprlist ")" */
+  tbi_str      /* str              */
 } parser_table_item;
 
-parser_table_item parser_parsing_table[7][8] =
+parser_table_item parser_parsing_table[2][9] =
 {
-/*               '           (            bool        num         str         id          nil         eof */
-/* exprlist  */ {tbi_eelist, tbi_eelist,  tbi_eelist, tbi_eelist, tbi_eelist, tbi_eelist, tbi_eelist, tbi_null},
-/* _exprlist */ {tbi_elist,  tbi_elist,   tbi_elist,  tbi_elist,  tbi_elist,  tbi_elist,  tbi_elist,  tbi_empty},
-/* expr      */ {tbi_qexpr,  tbi_qexpr,   tbi_qexpr,  tbi_qexpr,  tbi_qexpr,  tbi_qexpr,  tbi_qexpr,  tbi_null},
-/* quote     */ {tbi_quote,  tbi_empty,   tbi_empty,  tbi_empty,  tbi_empty,  tbi_empty,  tbi_empty,  tbi_null},
-/* _expr     */ {tbi_null,   tbi_list,    tbi_atom,   tbi_atom,   tbi_atom,   tbi_atom,   tbi_atom,   tbi_null},
-/* atom      */ {tbi_null,   tbi_null,    tbi_bool,   tbi_num,    tbi_str,    tbi_id,     tbi_nil,    tbi_null},
-/* list      */ {tbi_null,   tbi_thelist, tbi_null,   tbi_null,   tbi_null,   tbi_null,   tbi_null,   tbi_null},
+/*               '           (           bool        num         str         id          nil         )          eof */
+/* exprlist  */ {tbi_eelist, tbi_eelist, tbi_eelist, tbi_eelist, tbi_eelist, tbi_eelist, tbi_eelist, tbi_empty, tbi_empty},
+/* expr      */ {tbi_qexpr,  tbi_list,   tbi_bool,   tbi_num,    tbi_str,    tbi_id,     tbi_nil,    tbi_null,  tbi_null},
 };
 
 enum parser_prodkind {
   pk_exprlist,
-  pk__exprlist,
-  pk_expr,
-  pk__expr,
-  pk_quote,
-  pk_atom,
-  pk_list
+  pk_expr
 };
-
+  
 typedef struct {
   enum lex_kind lkind;
   enum parser_prodkind pkind;
   bool isTerminal;
 } parser_stack_item;
+
+typedef struct {
+  pool* pool;     // cells go here
+  freelist* fl;   // strings here
+  stack_f* stack; // productions (for parsing)
+} environment;
+
+void parse(environment* env, char* text) {
+}
 
 /*
  * -------------------------------------
